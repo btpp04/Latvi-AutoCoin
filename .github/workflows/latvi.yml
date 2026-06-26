@@ -2,7 +2,7 @@ name: Latvi Auto Coin
 
 on:
   schedule:
-    - cron: '7 0,12 * * *'  # 08:07 + 20:07 CST
+    - cron: '7 0,12 * * *'
   workflow_dispatch:
 
 jobs:
@@ -16,71 +16,48 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install deps
-        run: pip install requests PySocks
+      - name: Install Chrome
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y google-chrome-stable || true
 
-      - name: Setup proxy tunnel
+      - name: Install deps
+        run: pip install seleniumbase requests
+
+      - name: Setup proxy (optional)
         env:
           RAW_PROXY: ${{ secrets.PROXY }}
         run: |
-          set -e
           if [[ -z "$RAW_PROXY" ]]; then
             echo "PROXY=" >> $GITHUB_ENV
             exit 0
           fi
-          # Already a direct proxy (socks5/http)
           if [[ "$RAW_PROXY" =~ ^(socks5|http|https):// ]]; then
             echo "PROXY=$RAW_PROXY" >> $GITHUB_ENV
             exit 0
           fi
-          # hy2 → sing-box tunnel
           [[ "$RAW_PROXY" =~ ^hysteria2:// ]] || { echo "unsupported proxy"; exit 1; }
           wget -qO sb.tar.gz https://github.com/SagerNet/sing-box/releases/download/v1.13.7/sing-box-1.13.7-linux-amd64.tar.gz
           tar -xzf sb.tar.gz
-          mv sing-box-*/sing-box ./sing-box
-          chmod +x ./sing-box
-
-          STRIPPED="${RAW_PROXY#hysteria2://}"
-          STRIPPED="${STRIPPED%%#*}"
-          NO_QUERY="${STRIPPED%%\?*}"
-          QUERY="${STRIPPED#*\?}"
-          AUTH_HOST="${NO_QUERY%@*}"
-          HOSTPORT="${NO_QUERY##*@}"
-          USER="${AUTH_HOST%:*}"
-          PASS="${AUTH_HOST#*:}"
-          HOST="${HOSTPORT%:*}"
-          PORT="${HOSTPORT#*:}"
-
-          PEER=$(echo "$QUERY" | tr '&' '\n' | grep '^peer=' | sed 's/^peer=//')
-          INSECURE=$(echo "$QUERY" | tr '&' '\n' | grep '^insecure=' | sed 's/^insecure=//')
-          ALPN=$(echo "$QUERY" | tr '&' '\n' | grep '^alpn=' | sed 's/^alpn=//')
-          PEER="${PEER:-www.bing.com}"
-          ALPN="${ALPN:-h3}"
-          INSECURE_LINE=""
-          [[ "$INSECURE" == "1" ]] && INSECURE_LINE='"insecure": true,'
-
+          mv sing-box-*/sing-box ./sing-box && chmod +x ./sing-box
+          STRIPPED="${RAW_PROXY#hysteria2://}"; STRIPPED="${STRIPPED%%#*}"
+          NO_QUERY="${STRIPPED%%\?*}"; QUERY="${STRIPPED#*\?}"
+          AUTH_HOST="${NO_QUERY%@*}"; HOSTPORT="${NO_QUERY##*@}"
+          USER="${AUTH_HOST%:*}"; PASS="${AUTH_HOST#*:}"
+          HOST="${HOSTPORT%:*}"; PORT="${HOSTPORT#*:}"
+          PEER=$(echo "$QUERY"|tr '&' '\n'|grep '^peer='|sed 's/^peer=//'); PEER="${PEER:-www.bing.com}"
+          ALPN=$(echo "$QUERY"|tr '&' '\n'|grep '^alpn='|sed 's/^alpn=//'); ALPN="${ALPN:-h3}"
+          INSECURE_LINE=""; [[ "$(echo "$QUERY"|tr '&' '\n'|grep '^insecure=1')" ]] && INSECURE_LINE='"insecure": true,'
           cat > config.json <<CFG
-          {
-            "log": {"level": "warn"},
-            "inbounds": [{"type":"socks","tag":"socks-in","listen":"127.0.0.1","listen_port":1080}],
-            "outbounds": [{
-              "type":"hysteria2","tag":"hy2-out",
-              "server":"${HOST}","server_port":${PORT},
-              "password":"${PASS}",
-              "tls":{"enabled":true,"server_name":"${PEER}","alpn":["${ALPN}"],${INSECURE_LINE}}
-            }]
-          }
-          CFG
-
+          {"log":{"level":"warn"},"inbounds":[{"type":"socks","tag":"socks-in","listen":"127.0.0.1","listen_port":1080}],"outbounds":[{"type":"hysteria2","tag":"hy2-out","server":"${HOST}","server_port":${PORT},"password":"${PASS}","tls":{"enabled":true,"server_name":"${PEER}","alpn":["${ALPN}"],${INSECURE_LINE}}}]}
+CFG
           ./sing-box run -c config.json &
           sleep 3
           echo "PROXY=socks5://127.0.0.1:1080" >> $GITHUB_ENV
 
-      - name: Run latvi_coin.py
+      - name: Run latvi_coin_uc.py
         env:
           LATVI_EMAIL: ${{ secrets.LATVI_EMAIL }}
           LATVI_PASSWORD: ${{ secrets.LATVI_PASSWORD }}
           PROXY: ${{ env.PROXY }}
-          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
-          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
-        run: python latvi_coin.py
+        run: python latvi_coin_uc.py
