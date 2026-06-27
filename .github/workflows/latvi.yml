@@ -1,7 +1,31 @@
-name: test
-on: workflow_dispatch
+name: Latvi Auto Coin
+
+on:
+  schedule:
+    - cron: '7 0,12 * * *'
+  workflow_dispatch:
+
 jobs:
-  test:
+  run:
     runs-on: ubuntu-latest
     steps:
-      - run: echo hello
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Chrome
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq google-chrome-stable 2>/dev/null || true
+
+      - name: Install deps
+        run: pip install seleniumbase requests
+
+      - name: Run latvi_coin_uc.py
+        env:
+          LATVI_EMAIL: ${{ secrets.LATVI_EMAIL }}
+          LATVI_PASSWORD: ${{ secrets.LATVI_PASSWORD }}
+        run: python latvi_coin_uc.py
