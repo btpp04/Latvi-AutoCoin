@@ -43,10 +43,10 @@ def login():
     m = re.search(r'name="_token"[^>]*value="([^"]*)"', r.text)
     token = m.group(1) if m else None
     
-    r2 = sess.post(f"{BASE}/login", data={
-        "email": EMAIL, "password": PASSWORD,
-        **(("_token", token) if token else {})
-    }, timeout=15)
+    data = {"email": EMAIL, "password": PASSWORD}
+    if token:
+        data["_token"] = token
+    r2 = sess.post(f"{BASE}/login", data=data, timeout=15)
     
     if "/home" in r2.url or "logout" in r2.text.lower():
         log("✅ login")
