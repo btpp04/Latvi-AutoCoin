@@ -37,5 +37,5 @@ jobs:
         env:
           LATVI_EMAIL: ${{ secrets.LATVI_EMAIL }}
           LATVI_PASSWORD: ${{ secrets.LATVI_PASSWORD }}
-          PROXY_LIST: "socks5://44fa737d:1bab4a4504ca@38.96.191.150:21719,http://5l7Cpl8Kt8ai-flux-tw-sid-b2c33f70a1bf-sesstime-120:X0s2ebFaZiWR@as.talordata.net:2600,http://5l7Cpl8Kt8ai-flux-us-sid-dd7a7937feaf-sesstime-120:X0s2ebFaZiWR@na.talordata.net:2600,http://5l7Cpl8Kt8ai-flux-jp-sid-a3c44e82c9fg-sesstime-120:X0s2ebFaZiWR@as.talordata.net:2600"
+          PROXY_LIST: "socks5://44fa737d:1bab4a4504ca@38.96.191.150:21719"
         run: xvfb-run -a python latvi_coin_uc.py
