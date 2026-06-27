@@ -126,7 +126,10 @@ def main():
         b1 = balance(d)
         log(f"done {ok_cnt} ok {b0} → {b1} (+{b1-b0})")
     finally:
-        try: d.quit(); except: pass
+        try:
+            d.quit()
+        except:
+            pass
 
 if __name__ == "__main__":
     main()
