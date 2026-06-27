@@ -26,10 +26,58 @@ def start_gost(proxy_url):
     try:
         r = requests.get("https://api.ipify.org", proxies={"http": LOCAL_PROXY, "https": LOCAL_PROXY}, timeout=10)
         ip = r.text.strip()
-        log(f"✅ GOST代理 | IP: {ip}")
+        log(f"✅ GOST | IP: {ip}")
         return ip
-    except:
-        log("❌ GOST启动失败"); return None
+    except Exception as e:
+        log(f"❌ GOST: {e}"); return None
+
+def wait_for_cf(d, timeout=60):
+    """Handle Cloudflare challenge"""
+    log("等待页面加载（可能包含 CF 验证）...")
+    start = time.time()
+    while time.time() - start < timeout:
+        page = d.get_page_source().lower()
+        # CF still active
+        if "checking your browser" in page or "just a moment" in page or "cf-challenge" in page:
+            log(f"  CF 验证中... ({int(time.time()-start)}s)")
+            try: d.uc_gui_click_captcha(); time.sleep(3)
+            except: time.sleep(2)
+        else:
+            return True
+    return False
+
+def login(d):
+    d.get(f"{BASE}/login"); time.sleep(2)
+    wait_for_cf(d)
+    
+    # Try several times to find the form
+    for attempt in range(3):
+        try:
+            d.type('input[name="email"]', EMAIL)
+            d.type('input[name="password"]', PASSWORD)
+            d.click('button[type="submit"]')
+            time.sleep(3)
+            if "/home" in d.current_url or "dashboard" in d.current_url:
+                log("✅ login"); return True
+        except Exception as e:
+            log(f"  login attempt {attempt+1}: {str(e)[:60]}")
+            time.sleep(3)
+    
+    # Fallback: try uc_open_with_reconnect
+    try:
+        d.uc_open_with_reconnect(f"{BASE}/login", 30)
+        time.sleep(3)
+        if d.is_element_visible('iframe[src*="cloudflare"]'):
+            d.uc_gui_click_captcha(); time.sleep(5)
+        d.type('input[name="email"]', EMAIL)
+        d.type('input[name="password"]', PASSWORD)
+        d.click('button[type="submit"]'); time.sleep(3)
+        if "/home" in d.current_url:
+            log("✅ login (uc reconnect)"); return True
+    except: pass
+    
+    log(f"❌ login: {d.current_url}")
+    return False
 
 def balance(d):
     d.get(f"{BASE}/home"); time.sleep(1)
@@ -45,60 +93,55 @@ def cooldown(d):
     return MAX_CLAIMS
 
 def earn(d):
-    # Go to linkvertise page
     d.get(f"{BASE}/linkvertise"); time.sleep(2)
     try: d.click('a:contains("Start Now")')
     except:
         try: d.click('button:contains("Start")')
         except: log("❌ no start"); return False
 
-    time.sleep(5)
+    time.sleep(8)
     current = d.current_url
     log(f"redirected: {current[:60]}...")
     
-    if "linkvertise" not in current:
+    if "linkvertise" not in current and "link-to" not in current:
         log("❌ not on linkvertise"); return False
 
-    # Extract campaign
-    m = re.search(r'linkvertise\.com/(\d+)', current)
+    m = re.search(r'(\d+)', current)
     if not m: log("❌ no campaign"); return False
     cid = m.group(1)
     log(f"campaign: {cid}")
 
-    # Wait for tasks - browser handles WaitTask via JS
-    # The SeleniumBase UC browser + residential proxy should bypass CF on API too
-    log("waiting for task chain...")
+    log("waiting for task chain (up to 110s)...")
     start = time.time()
     while time.time() - start < 110:
-        time.sleep(3)
+        time.sleep(5)
         
-        # Check if redirected back
         if "latvi.space" in d.current_url:
-            time.sleep(2)
             body = d.get_page_source()
             if "success" in body.lower() or "credited" in body.lower():
                 log("✅ credited!"); return True
             log("back on latvi"); return True
 
-        # Try visiting API directly (browser has proxy cookies)
-        if int(time.time() - start) % 20 == 0:
-            d.get(f"https://linkvertise.com/api/v1/getContent?campaign={cid}")
-            time.sleep(2)
-            body = d.get_page_source()
-            log(f"API: {body[:100]}")
-            if "DetailPageTargetData" in body:
-                try:
-                    data = json.loads(body)
-                    link = data.get("data", {}).get("link", "")
-                    if link:
-                        log(f"verify: {link[:60]}")
-                        d.get(link); time.sleep(3)
-                        log("✅ credited!"); return True
-                except: pass
-            # Navigate back to linkvertise page
-            d.get(current); time.sleep(2)
+        # Try API via browser navigation
+        api_url = f"https://linkvertise.com/api/v1/getContent?campaign={cid}"
+        d.get(api_url); time.sleep(2)
+        body = d.get_page_source()
+        log(f"API: {body[:80]}")
         
-        log(f"  waiting ({int(time.time()-start)}s)")
+        if "DetailPageTargetData" in body:
+            try:
+                data = json.loads(body)
+                link = data.get("data", {}).get("link", "")
+                if link:
+                    log(f"verify: {link[:60]}")
+                    d.get(link); time.sleep(3)
+                    log("✅ credited!"); return True
+            except: pass
+        
+        # Go back to linkvertise
+        d.get(current); time.sleep(2)
+        elapsed = int(time.time() - start)
+        log(f"  waiting ({elapsed}s)")
 
     log(f"❌ timeout"); return False
 
@@ -111,20 +154,11 @@ def try_proxy(proxy_url, idx, total):
 
     d = Driver(uc=True, headless=True, proxy=LOCAL_PROXY, browser="chrome")
     try:
-        # Login
-        d.get(f"{BASE}/login"); time.sleep(2)
-        d.type('input[name="email"]', EMAIL)
-        d.type('input[name="password"]', PASSWORD)
-        d.click('button[type="submit"]'); time.sleep(2)
-        if "/home" not in d.current_url:
-            log("❌ login failed"); return None
-        log("✅ login")
+        if not login(d): return None
 
-        # Balance
         b0 = balance(d)
         log(f"balance: {b0}")
 
-        # Check cooldown
         rem = cooldown(d)
         if rem <= 0:
             log("done for today"); return True
@@ -139,32 +173,25 @@ def try_proxy(proxy_url, idx, total):
         b1 = balance(d)
         log(f"done {ok_cnt} ok {b0}→{b1} (+{b1-b0})")
         return True
-
     finally:
-        try:
-            d.quit()
-        except:
-            pass
+        try: d.quit()
+        except: pass
 
 def main():
-    log("🚀 latvi (GOST + proxy list)")
-    
+    log("🚀 latvi (GOST + proxy)")
     if not PROXY_LIST:
-        log("❌ 未配置 PROXY_LIST")
-        return
-
+        log("❌ no PROXY_LIST"); return
     log(f"共 {len(PROXY_LIST)} 个代理")
     
     for idx, proxy in enumerate(PROXY_LIST, 1):
         result = try_proxy(proxy, idx, len(PROXY_LIST))
         if result is True:
-            log(f"✅ 完成！"); return
+            log("✅ 完成！"); return
         elif result is False:
-            log(f"⚠️ 换下一个代理..."); continue
+            log("⚠️ 换代理..."); continue
         else:
-            log(f"⚠️ 操作失败，停止"); break
-    
-    log("❌ 所有代理都失败了")
+            log("⚠️ 失败，停止"); break
+    log("❌ 全失败")
 
 if __name__ == "__main__":
     main()
