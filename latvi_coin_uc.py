@@ -11,22 +11,18 @@ BASE = "https://dash.latvi.space"
 EMAIL = os.environ.get("LATVI_EMAIL", "btpp03@gmail.com")
 PASSWORD = os.environ.get("LATVI_PASSWORD", "Hlm@0649")
 MAX_CLAIMS = int(os.environ.get("MAX_CLAIMS", "20"))
-PROXY = os.environ.get("PROXY", "")
 
 def log(msg):
     print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
 
 def init_driver():
-    options = ["--disable-gpu", "--no-sandbox", "--disable-dev-shm-usage"]
-    if PROXY:
-        options.append(f"--proxy-server={PROXY}")
-    d = Driver(uc=True, headless=True, browser="chrome", agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36", options=options)
+    d = Driver(uc=True, headless=True, browser="chrome")
     return d
 
 # ─── login ───────────────────────────────
 def login(d):
     d.get(f"{BASE}/login")
-    token = d.get_attribute('input[name="_token"]', "value")
+    time.sleep(2)
     d.type('input[name="email"]', EMAIL)
     d.type('input[name="password"]', PASSWORD)
     d.click('button[type="submit"]')
@@ -70,7 +66,6 @@ def balance(d):
 
 # ─── earn ─────────────────────────────────
 def earn(d):
-    """Click Start Now on linkvertise page → browser follows full chain"""
     d.get(f"{BASE}/linkvertise")
     time.sleep(2)
     
@@ -84,42 +79,28 @@ def earn(d):
             return False
     
     log("clicked Start Now, waiting for redirect...")
-    
-    # Wait for the page to load - browser follows link-to.net → linkvertise
-    # SeleniumBase UC passes Cloudflare JS challenge automatically
     time.sleep(3)
-    
-    # Detect current URL
     current = d.current_url
     log(f"redirected to: {current[:60]}...")
     
     if "linkvertise" in current:
         log("on linkvertise, completing tasks...")
-        time.sleep(5)  # Wait for tasks to process
-        
-        # Check if we're still on linkvertise
         for i in range(15):
             time.sleep(2)
             current = d.current_url
             log(f"  check {i+1}: {current[:60]}...")
-            
             if "latvi.space" in current and "verify" in current:
                 log(f"✅ verify URL reached!")
                 return True
-            
             if "linkvertise" not in current:
                 break
     
-    # Back on latvi.space - check if we got credited
     if "latvi.space" in d.current_url:
         time.sleep(1)
         log("back on latvi.space")
-        
-        # Check for success indicators
         if "verify" in d.current_url:
             log(f"✅ verify: {d.current_url[:70]}")
             return True
-        
         body = d.get_page_source()
         if "success" in body.lower() or "credited" in body.lower():
             log("✅ credited!")
@@ -136,7 +117,6 @@ def main():
     try:
         login(d)
         daily(d)
-        
         rem = cooldown(d)
         if rem <= 0:
             log("🎉 done for today")
