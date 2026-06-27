@@ -16,15 +16,8 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install Chrome
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq google-chrome-stable 2>/dev/null || true
-
       - name: Install deps
-        run: |
-          pip install seleniumbase requests
-          seleniumbase install chromedriver
+        run: pip install requests
 
       - name: Download Gost
         run: |
