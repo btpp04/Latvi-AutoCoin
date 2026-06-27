@@ -80,31 +80,65 @@ def run_browser(link_url, verify_url):
         current = sb.get_current_url()
         log(f"after 5s: {current[:80]}")
         
-        # Wait for linkvertise to process (max 60s)
-        for i in range(12):
+        sb.sleep(8)  # Wait for SPA to render
+        
+        # Take screenshot for debugging
+        try:
+            sb.save_screenshot("lv_page.png")
+            log("screenshot saved")
+        except:
+            pass
+        
+        # Get page source for debugging
+        try:
+            html = sb.get_page_source()
+            log(f"page HTML: {len(html)} chars")
+            # Look for buttons/links
+            btns = sb.find_elements("button")
+            log(f"buttons found: {len(btns)}")
+            for btn in btns[:10]:
+                try:
+                    txt = btn.text.strip()
+                    if txt:
+                        log(f"  btn: '{txt}'")
+                except:
+                    pass
+            links = sb.find_elements("a")
+            log(f"links found: {len(links)}")
+            for link in links[:10]:
+                try:
+                    txt = link.text.strip()
+                    href = link.get_attribute("href") or ""
+                    if txt and len(txt) < 50:
+                        log(f"  link: '{txt}' → {href[:60]}")
+                except:
+                    pass
+        except Exception as e:
+            log(f"page source error: {str(e)[:60]}")
+        
+        # Wait for redirect (max 120s)
+        for i in range(24):
             sb.sleep(5)
             current = sb.get_current_url()
             log(f"  {(i+1)*5}s: {current[:80]}")
             
-            # Check if redirected to latvi verify
             if "latvi.space" in current or "verify" in current:
                 log("✅ redirected to latvi!")
                 return True
             
-            # Check if on linkvertise and need to click
-            if "linkvertise" in current:
-                try:
-                    # Look for "Continue" or "Free" button
-                    btns = sb.find_elements("button")
-                    for btn in btns:
+            # Try clicking any visible button
+            try:
+                btns = sb.find_elements("button")
+                for btn in btns:
+                    if btn.is_displayed():
                         txt = btn.text.lower()
-                        if any(k in txt for k in ["continue", "free", "next", "skip", "claim"]):
-                            log(f"  clicking: {btn.text}")
-                            btn.click()
+                        if any(k in txt for k in ["continue", "free", "next", "skip", "claim", "start", "download", "go"]):
+                            log(f"  clicking: '{btn.text}'")
+                            sb.click(btn)
                             sb.sleep(3)
                             break
-                except:
-                    pass
+            except:
+                pass
         
         # After waiting, try the verify URL directly
         if verify_url:
