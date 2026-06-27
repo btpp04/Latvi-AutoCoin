@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-latvi.space Auto Coin — Pure browser mode
-Everything in SeleniumBase UC: login, bypass CF on linkvertise, task interaction
+latvi.space Auto Coin — Browser + JS XHR hybrid
+UC browser bypasses CF, then JS fetch calls linkvertise API in-browser
 """
-import os, sys, time, re
+import os, sys, time, re, json
 from datetime import datetime, timezone
 from seleniumbase import Driver
 
@@ -17,8 +17,7 @@ def ok(m): log(f"✅ {m}")
 def er(m): log(f"❌ {m}")
 
 def init_driver():
-    d = Driver(uc=True, headless=True, browser="chrome")
-    return d
+    return Driver(uc=True, headless=True, browser="chrome")
 
 def login(d):
     d.get(f"{BASE}/login"); time.sleep(2)
@@ -30,10 +29,8 @@ def login(d):
 
 def daily(d):
     d.get(f"{BASE}/daily-rewards")
-    try:
-        d.click('button:contains("Claim")')
-        time.sleep(2); ok("daily")
-    except: log("daily skip")
+    try: d.click('button:contains("Claim")'); time.sleep(2); ok("daily")
+    except: pass
 
 def cooldown(d):
     d.get(f"{BASE}/linkvertise"); time.sleep(1)
@@ -48,6 +45,14 @@ def balance(d):
     m = re.search(r'([\d.]+)\s*(?:credit|coin)', d.get_page_source(), re.I)
     return float(m.group(1)) if m else 0.0
 
+def js_fetch(d, url):
+    """Execute fetch in browser context (has CF cookies/headers)"""
+    return d.execute_script(f"""
+        return fetch("{url}", {{
+            headers: {{"User-Agent": navigator.userAgent}}
+        }}).then(r => r.text()).catch(e => "FETCH_ERR:" + e.message);
+    """)
+
 def earn(d):
     d.get(f"{BASE}/linkvertise"); time.sleep(2)
     try: d.click('a:contains("Start Now")')
@@ -55,48 +60,71 @@ def earn(d):
         try: d.click('button:contains("Start")')
         except: er("no start btn"); return False
     
-    log("loading linkvertise..."); time.sleep(5)
+    # Wait for redirect to linkvertise
+    time.sleep(5)
+    current = d.current_url
+    log(f"on: {current[:60]}...")
     
-    # Wait for the page to load (browser follows redirect, UC passes CF)
-    start = time.time()
-    while time.time() - start < 30:
-        time.sleep(2)
-        current = d.current_url
-        log(f"  url: {current[:65]}...")
+    if "linkvertise" not in current:
+        er("not on linkvertise"); return False
+    
+    # Extract campaign ID
+    m = re.search(r'linkvertise\.com/(\d+)', current)
+    if not m: er("no campaign"); return False
+    cid = m.group(1)
+    ok(f"campaign {cid}")
+    
+    # Use JS fetch to call linkvertise API (browser context = real CF cookies)
+    r = js_fetch(d, f"https://linkvertise.com/api/v1/getContent?campaign={cid}")
+    log(f"getContent: {r[:200]}")
+    
+    if "WaitTask" in r:
+        ok("WaitTask found")
+        try:
+            data = json.loads(r)
+            log(f"tasks: {json.dumps(data)[:200]}")
+        except: pass
         
-        # Check if we returned to latvi.space with verify
-        if "latvi.space" in current and "verify" in current:
-            ok(f"verify reached! {current[:70]}")
-            return True
-        if "latvi.space" in current:
-            body = d.get_page_source()
-            if "success" in body.lower() or "credited" in body.lower():
-                ok("credited!"); return True
+        # Wait for WaitTask
+        time.sleep(12)
         
-        # Still on linkvertise - interact with the page
-        if "linkvertise" in current:
+        # Check task status
+        r2 = js_fetch(d, f"https://linkvertise.com/api/v1/getContent?campaign={cid}")
+        log(f"after wait: {r2[:200]}")
+        
+        # If premium, wait and check again
+        time.sleep(8)
+        r3 = js_fetch(d, f"https://linkvertise.com/api/v1/getContent?campaign={cid}")
+        log(f"after premium: {r3[:200]}")
+        
+        if "DetailPageTargetData" in r3:
             try:
-                # Check for interactive elements
-                btns = d.find_elements("button, a, .btn, [class*=button], [class*=btn]")
-                for btn in btns:
-                    txt = btn.text.lower()
-                    if any(x in txt for x in ["continue", "proceed", "claim", "start", "next", "watch", "get link"]):
-                        log(f"  clicking: {btn.text[:30]}")
-                        btn.click(); time.sleep(2)
-                        break
+                data = json.loads(r3)
+                link = data.get("data", {}).get("link", "")
+                log(f"✅ verify URL: {link[:80]}")
+                # Visit verify URL from browser
+                d.get(link); time.sleep(3)
+                ok("credited!")
+                return True
             except: pass
     
-    log(f"  timeout, final url: {d.current_url[:60]}")
-    return False
+    # Check if page has auto-redirected back to latvi
+    time.sleep(3)
+    if "latvi.space" in d.current_url:
+        body = d.get_page_source()
+        if "success" in body.lower() or "credited" in body.lower():
+            ok("credited!"); return True
+    
+    er("chain failed"); return False
 
 def main():
-    log("🚀 latvi browser")
+    ok("🚀 latvi JS-XHR")
     d = init_driver()
     try:
         login(d)
         daily(d)
         rem = cooldown(d)
-        if rem <= 0: ok("done for today"); return
+        if rem <= 0: ok("done"); return
         
         b0 = balance(d); ok(f"balance {b0}")
         ok_cnt = 0
@@ -109,8 +137,7 @@ def main():
         b1 = balance(d)
         ok(f"done {ok_cnt} ok {b0} → {b1} (+{b1-b0})")
     finally:
-        try: d.quit()
-        except: pass
+        try: d.quit(); except: pass
 
 if __name__ == "__main__":
     main()
