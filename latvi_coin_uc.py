@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-latvi.space Auto Coin — GOST 代理 + SeleniumBase UC 浏览器完整流程
-同步自 freecloud 的成功方案 (多代理自动切换)
+latvi.space Auto Coin
+浏览器登录 latvi（无代理，latvi 没有 CF）→ cookies → requests 走 GOST 代理调 linkvertise API
 """
 import time, re, json, os, subprocess, requests
 from datetime import datetime, timezone
@@ -13,6 +13,8 @@ PASSWORD = os.environ.get("LATVI_PASSWORD", "Hlm@0649")
 MAX_CLAIMS = int(os.environ.get("MAX_CLAIMS", "20"))
 LOCAL_PROXY = "http://127.0.0.1:8080"
 PROXY_LIST = [p.strip() for p in os.environ.get("PROXY_LIST", "").split(",") if p.strip()]
+
+sess = requests.Session()
 
 def log(m): print(f"[{datetime.now(timezone.utc).strftime('%H:%M:%S')}] {m}", flush=True)
 
@@ -31,119 +33,82 @@ def start_gost(proxy_url):
     except Exception as e:
         log(f"❌ GOST: {e}"); return None
 
-def wait_for_cf(d, timeout=60):
-    """Handle Cloudflare challenge"""
-    log("等待页面加载（可能包含 CF 验证）...")
-    start = time.time()
-    while time.time() - start < timeout:
-        page = d.get_page_source().lower()
-        # CF still active
-        if "checking your browser" in page or "just a moment" in page or "cf-challenge" in page:
-            log(f"  CF 验证中... ({int(time.time()-start)}s)")
-            try: d.uc_gui_click_captcha(); time.sleep(3)
-            except: time.sleep(2)
-        else:
-            return True
-    return False
-
-def login(d):
-    d.get(f"{BASE}/login"); time.sleep(2)
-    wait_for_cf(d)
-    
-    # Try several times to find the form
-    for attempt in range(3):
-        try:
-            d.type('input[name="email"]', EMAIL)
-            d.type('input[name="password"]', PASSWORD)
-            d.click('button[type="submit"]')
-            time.sleep(3)
-            if "/home" in d.current_url or "dashboard" in d.current_url:
-                log("✅ login"); return True
-        except Exception as e:
-            log(f"  login attempt {attempt+1}: {str(e)[:60]}")
-            time.sleep(3)
-    
-    # Fallback: try uc_open_with_reconnect
+def get_content(campaign, gost=False):
+    """Get linkvertise task content"""
+    url = f"https://linkvertise.com/api/v1/getContent?campaign={campaign}"
+    proxies = {"http": LOCAL_PROXY, "https": LOCAL_PROXY} if gost else None
     try:
-        d.uc_open_with_reconnect(f"{BASE}/login", 30)
-        time.sleep(3)
-        if d.is_element_visible('iframe[src*="cloudflare"]'):
-            d.uc_gui_click_captcha(); time.sleep(5)
-        d.type('input[name="email"]', EMAIL)
-        d.type('input[name="password"]', PASSWORD)
-        d.click('button[type="submit"]'); time.sleep(3)
-        if "/home" in d.current_url:
-            log("✅ login (uc reconnect)"); return True
-    except: pass
+        r = sess.get(url, proxies=proxies, timeout=20, allow_redirects=True)
+        return r.text, r
+    except Exception as e:
+        log(f"getContent error: {e}")
+        return None, None
+
+def earn_by_requests(gost=False):
+    """Earn coins via API calls through proxy"""
+    # Get linkvertise URL from latvi
+    r = sess.get(f"{BASE}/linkvertise", timeout=15)
+    html = r.text
     
-    log(f"❌ login: {d.current_url}")
-    return False
-
-def balance(d):
-    d.get(f"{BASE}/home"); time.sleep(1)
-    m = re.search(r'([\d.]+)\s*(?:credit|coin)', d.get_page_source(), re.I)
-    return float(m.group(1)) if m else 0.0
-
-def cooldown(d):
-    d.get(f"{BASE}/linkvertise"); time.sleep(1)
-    m = re.search(r'Claims Today:\s*(\d+)\s*/\s*(\d+)', d.get_page_source())
-    if m:
-        rem = int(m.group(2)) - int(m.group(1))
-        log(f"{m.group(1)}/{m.group(2)} ({rem} left)"); return rem
-    return MAX_CLAIMS
-
-def earn(d):
-    d.get(f"{BASE}/linkvertise"); time.sleep(2)
-    try: d.click('a:contains("Start Now")')
-    except:
-        try: d.click('button:contains("Start")')
-        except: log("❌ no start"); return False
-
-    time.sleep(8)
-    current = d.current_url
-    log(f"redirected: {current[:60]}...")
-    
-    if "linkvertise" not in current and "link-to" not in current:
-        log("❌ not on linkvertise"); return False
-
-    m = re.search(r'(\d+)', current)
-    if not m: log("❌ no campaign"); return False
+    # Extract campaign from the page
+    m = re.search(r'linkvertise\.com/(\d+)', html)
+    if not m:
+        log("❌ no campaign on latvi page")
+        return False
     cid = m.group(1)
     log(f"campaign: {cid}")
-
-    log("waiting for task chain (up to 110s)...")
-    start = time.time()
-    while time.time() - start < 110:
-        time.sleep(5)
+    
+    # Also try to send start request to latvi
+    r2 = sess.get(f"{BASE}/linkvertise", timeout=15)
+    
+    # Get content via API (through proxy)
+    body, resp = get_content(cid, gost)
+    if body is None:
+        log("❌ getContent failed"); return False
+    
+    log(f"getContent: {body[:100]}")
+    
+    if "WaitTask" in body:
+        log("WaitTask found ✓")
+        time.sleep(12)
         
-        if "latvi.space" in d.current_url:
-            body = d.get_page_source()
-            if "success" in body.lower() or "credited" in body.lower():
-                log("✅ credited!"); return True
-            log("back on latvi"); return True
-
-        # Try API via browser navigation
-        api_url = f"https://linkvertise.com/api/v1/getContent?campaign={cid}"
-        d.get(api_url); time.sleep(2)
-        body = d.get_page_source()
-        log(f"API: {body[:80]}")
+        body2, _ = get_content(cid, gost)
+        log(f"after wait: {body2[:100] if body2 else 'None'}")
         
-        if "DetailPageTargetData" in body:
+        if body2 and "DetailPageTargetData" in body2:
             try:
-                data = json.loads(body)
+                data = json.loads(body2)
                 link = data.get("data", {}).get("link", "")
                 if link:
                     log(f"verify: {link[:60]}")
-                    d.get(link); time.sleep(3)
-                    log("✅ credited!"); return True
+                    r3 = sess.get(link, proxies={"http": LOCAL_PROXY, "https": LOCAL_PROXY} if gost else None, timeout=15)
+                    log(f"verify status: {r3.status_code}")
+                    log("✅ credited!")
+                    return True
             except: pass
         
-        # Go back to linkvertise
-        d.get(current); time.sleep(2)
-        elapsed = int(time.time() - start)
-        log(f"  waiting ({elapsed}s)")
-
-    log(f"❌ timeout"); return False
+        time.sleep(8)
+        body3, _ = get_content(cid, gost)
+        log(f"final: {body3[:100] if body3 else 'None'}")
+        
+        if body3 and "DetailPageTargetData" in body3:
+            try:
+                data = json.loads(body3)
+                link = data.get("data", {}).get("link", "")
+                if link:
+                    log(f"verify: {link[:60]}")
+                    r3 = sess.get(link, proxies={"http": LOCAL_PROXY, "https": LOCAL_PROXY} if gost else None, timeout=15)
+                    log("✅ credited!")
+                    return True
+            except: pass
+    
+    # Check latvi for success
+    r4 = sess.get(f"{BASE}/linkvertise", timeout=15)
+    if "success" in r4.text.lower():
+        log("✅ credited!")
+        return True
+    
+    log("❌ failed"); return False
 
 def try_proxy(proxy_url, idx, total):
     log(f"\n{'='*40}")
@@ -151,34 +116,58 @@ def try_proxy(proxy_url, idx, total):
     ip = start_gost(proxy_url)
     if not ip:
         log("⚠️ 代理不可用"); return False
-
-    d = Driver(uc=True, headless=True, proxy=LOCAL_PROXY, browser="chrome")
+    
+    # Browser login to latvi (no proxy)
+    d = Driver(uc=True, headless=True, browser="chrome")
     try:
-        if not login(d): return None
-
-        b0 = balance(d)
+        d.get(f"{BASE}/login"); time.sleep(2)
+        d.type('input[name="email"]', EMAIL)
+        d.type('input[name="password"]', PASSWORD)
+        d.click('button[type="submit"]'); time.sleep(3)
+        
+        if "/home" not in d.current_url:
+            log("❌ browser login failed"); return None
+        log("✅ browser login")
+        
+        # Extract cookies to requests session
+        for c in d.get_cookies():
+            sess.cookies.set(c['name'], c['value'], domain=c.get('domain', ''))
+        log(f"cookies: {len(d.get_cookies())}")
+        
+        # Check cooldown
+        d.get(f"{BASE}/linkvertise"); time.sleep(2)
+        html = d.get_page_source()
+        m = re.search(r'Claims Today:\s*(\d+)\s*/\s*(\d+)', html)
+        if m:
+            rem = int(m.group(2)) - int(m.group(1))
+            log(f"{m.group(1)}/{m.group(2)} ({rem} left)")
+            if rem <= 0: log("done"); return True
+        
+        # Balance
+        m = re.search(r'([\d.]+)\s*(?:credit|coin)', html, re.I)
+        b0 = float(m.group(1)) if m else 0.0
         log(f"balance: {b0}")
-
-        rem = cooldown(d)
-        if rem <= 0:
-            log("done for today"); return True
-
-        ok_cnt = 0
-        for i in range(min(rem, MAX_CLAIMS)):
-            log(f"--- #{i+1} ---")
-            if earn(d): ok_cnt += 1
-            else: break
-            time.sleep(3)
-
-        b1 = balance(d)
-        log(f"done {ok_cnt} ok {b0}→{b1} (+{b1-b0})")
-        return True
+        
     finally:
-        try: d.quit()
-        except: pass
+        try: d.quit(); except: pass
+    
+    # Earn via requests (through GOST proxy)
+    ok_cnt = 0
+    for i in range(min(rem if 'rem' in dir() else MAX_CLAIMS, MAX_CLAIMS)):
+        log(f"--- #{i+1} ---")
+        if earn_by_requests(gost=True): ok_cnt += 1
+        else: break
+        time.sleep(3)
+    
+    # Check final balance
+    r = sess.get(f"{BASE}/home", timeout=15)
+    m = re.search(r'([\d.]+)\s*(?:credit|coin)', r.text, re.I)
+    b1 = float(m.group(1)) if m else 0.0
+    log(f"done {ok_cnt} ok {b0}→{b1} (+{b1-b0})")
+    return True
 
 def main():
-    log("🚀 latvi (GOST + proxy)")
+    log("🚀 latvi (browser login + requests earn)")
     if not PROXY_LIST:
         log("❌ no PROXY_LIST"); return
     log(f"共 {len(PROXY_LIST)} 个代理")
