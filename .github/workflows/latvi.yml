@@ -17,7 +17,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install deps
-        run: pip install requests
+        run: pip install requests pysocks
 
       - name: Install sing-box
         run: |
@@ -27,16 +27,16 @@ jobs:
           chmod +x sing-box
 
       - name: Start hy2 tunnel
-        env:
-          HY2_URL: "hysteria2://f809270f-5fe8-4075-8ddb-254208b4d57a@103.116.52.143:26036?peer=www.bing.com&insecure=1&alpn=h3"
         run: |
-          cat > sb.json <<EOF
-          {"log":{"level":"warn"},"inbounds":[{"type":"socks","tag":"in","listen":"127.0.0.1","listen_port":1080}],"outbounds":[{"type":"hysteria2","tag":"out","server":"103.116.52.143","server_port":26036,"password":"f809270f-5fe8-4075-8ddb-254208b4d57a","tls":{"enabled":true,"server_name":"www.bing.com","alpn":["h3"],"insecure":true}}]}
+          cat > sb.json <<'EOF'
+          {"log":{"level":"info"},"inbounds":[{"type":"socks","tag":"in","listen":"127.0.0.1","listen_port":1080}],"outbounds":[{"type":"hysteria2","tag":"out","server":"103.116.52.143","server_port":26036,"password":"f809270f-5fe8-4075-8ddb-254208b4d57a","tls":{"enabled":true,"server_name":"www.bing.com","alpn":["h3"],"insecure":true}}]}
           EOF
-          ./sing-box run -c sb.json &
-          sleep 3
-          echo "Tunnel IP:"
-          curl -sS --socks5 127.0.0.1:1080 --max-time 8 https://api.ipify.org || echo "tunnel failed"
+          ./sing-box run -c sb.json > sb.log 2>&1 &
+          sleep 5
+          echo "=== sing-box log ==="
+          cat sb.log | head -10
+          echo "=== Tunnel IP ==="
+          curl -sS --socks5 127.0.0.1:1080 --max-time 10 https://api.ipify.org || { echo "tunnel failed"; cat sb.log; }
 
       - name: Run latvi_coin_uc.py
         env:
