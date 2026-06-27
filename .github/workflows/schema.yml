@@ -10,4 +10,4 @@ jobs:
         with:
           python-version: '3.11'
       - run: pip install requests
-      - run: python lv_schema4.py
+      - run: python lv_schema5.py
