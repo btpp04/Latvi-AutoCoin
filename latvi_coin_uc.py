@@ -149,7 +149,10 @@ def try_proxy(proxy_url, idx, total):
         log(f"balance: {b0}")
         
     finally:
-        try: d.quit(); except: pass
+        try:
+            d.quit()
+        except:
+            pass
     
     # Earn via requests (through GOST proxy)
     ok_cnt = 0
