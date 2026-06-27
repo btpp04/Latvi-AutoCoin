@@ -24,8 +24,16 @@ jobs:
       - name: Install deps
         run: pip install seleniumbase requests
 
+      - name: Download Gost
+        run: |
+          wget -q https://github.com/ginuerzh/gost/releases/download/v2.11.5/gost-linux-amd64-2.11.5.gz
+          gunzip gost-linux-amd64-2.11.5.gz
+          chmod +x gost-linux-amd64-2.11.5
+          mv gost-linux-amd64-2.11.5 gost
+
       - name: Run latvi_coin_uc.py
         env:
           LATVI_EMAIL: ${{ secrets.LATVI_EMAIL }}
           LATVI_PASSWORD: ${{ secrets.LATVI_PASSWORD }}
+          PROXY_LIST: ${{ secrets.PROXY_LIST }}
         run: python latvi_coin_uc.py
