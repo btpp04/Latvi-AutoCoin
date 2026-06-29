@@ -14,10 +14,10 @@ jobs:
         with:
           python-version: '3.11'
       - name: Install
-        run: |
-          pip install playwright
-          playwright install chromium
-      - name: Proxy test
+        run: pip install requests
+      - name: Test FULL flow
         env:
+          LATVI_EMAIL: ${{ secrets.LATVI_EMAIL }}
+          LATVI_PASSWORD: ${{ secrets.LATVI_PASSWORD }}
           PROXY: ${{ secrets.PROXY }}
-        run: python test_proxy.py
+        run: python test_full_flow.py
