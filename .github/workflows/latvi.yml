@@ -23,26 +23,34 @@ jobs:
       - name: 🛡️ Start GOST tunnel
         if: ${{ env.PROXY != '' }}
         run: |
+          echo "Proxy type: ${PROXY:0:8}"
+          
           # Download GOST
           curl -L -o gost.tar.gz "https://github.com/ginuerzh/gost/releases/download/v2.12.0/gost_2.12.0_linux_amd64.tar.gz"
           tar -xzf gost.tar.gz
           chmod +x gost
-          echo "GOST ready: $(ls -la gost | awk '{print $5}') bytes"
           
           # Start tunnel
-          nohup ./gost -L http://:8080 -F "$PROXY" > /tmp/gost.log 2>&1 &
-          sleep 4
-          GOST_PID=$(pgrep gost)
-          echo "GOST PID: $GOST_PID"
-          
-          # Verify
-          IP=$(curl -s --max-time 10 -x http://127.0.0.1:8080 https://ipinfo.talordata.com 2>/dev/null | jq -r '{ip, isp} | join(" | ")' 2>/dev/null || echo "FAILED")
-          echo "GOST IP: $IP"
+          if [[ "$PROXY" == socks5* ]]; then
+            echo "SOCKS5 proxy - will use direct mode, skip GOST"
+          else
+            nohup ./gost -L http://:8080 -F "$PROXY" > /tmp/gost.log 2>&1 &
+            sleep 4
+            pgrep gost && echo "GOST OK" || echo "GOST FAILED"
+            
+            # Verify
+            curl -s --max-time 10 -x http://127.0.0.1:8080 https://ipinfo.talordata.com 2>/dev/null | jq -r '{ip, isp} | join(" | ")' 2>/dev/null || echo "GOST verify skipped"
+          fi
           
       - name: 📦 Install requests (with socks fallback)
         run: |
           pip install requests
           pip install requests[socks] 2>/dev/null || true
+          
+      - name: 🌐 Test proxy connectivity
+        run: |
+          echo "=== Direct proxy test ==="
+          curl -s --max-time 10 -x "$PROXY" https://dash.latvi.space 2>&1 | head -3 || echo "PROXY UNREACHABLE"
 
       - name: 🚀 Run
         run: python latvi_coins.py
