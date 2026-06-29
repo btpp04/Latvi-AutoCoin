@@ -51,7 +51,12 @@ def login():
 
 def get_balance():
     r = sess.get(f"{BASE}/home", timeout=15)
-    m = re.search(r'([\d.]+)\s*(?:credit|coin)', r.text, re.I)
+    # Balance is the standalone number before "Store" in nav
+    m = re.search(r'>(\d+\.\d+)<\s*store', r.text, re.I)
+    if m: return float(m.group(1))
+    m = re.search(r'>(\d+\.?\d*)<\s*</a>\s*store', r.text, re.I | re.DOTALL)
+    if m: return float(m.group(1))
+    m = re.search(r'(\d+\.?\d*)\s*credit', r.text, re.I)
     return float(m.group(1)) if m else 0
 
 
@@ -222,6 +227,11 @@ def main():
     bal = get_balance()
     log.info(f"Balance: {bal}")
 
+    # Save balance for TG notification
+    bal = get_balance()
+    with open("/tmp/latvi_balance.txt", "w") as f:
+        f.write(f"{bal}")
+
     # Step 1: Daily reward (works through proxy, no linkvertise)
     daily_reward()
 
@@ -229,6 +239,10 @@ def main():
     remaining = get_cooldown()
     if remaining <= 0:
         log.info("No linkvertise claims left today")
+        bal2 = get_balance()
+        with open("/tmp/latvi_balance.txt", "w") as f:
+            f.write(f"{bal2}")
+        log.info(f"=== Done | {bal} → {bal2} ===")
         return
 
     success = 0
@@ -247,6 +261,8 @@ def main():
             time.sleep(10)
 
     bal2 = get_balance()
+    with open("/tmp/latvi_balance.txt", "w") as f:
+        f.write(f"{bal2}")
     log.info(f"=== Done: {success}/{min(remaining, MAX_CLAIMS)} | {bal} → {bal2} ===")
 
 

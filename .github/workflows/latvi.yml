@@ -48,5 +48,13 @@ jobs:
           echo "=== Direct proxy test ==="
           if curl -s --max-time 15 -x "$PROXY" https://dash.latvi.space > /dev/null 2>&1; then echo "PROXY OK"; else echo "PROXY FAILED"; fi
 
-      - name: 🚀 Run
+      - name: 🚀 Run (daily reward + linkvertise)
         run: python latvi_coins.py
+
+      - name: 🌐 Install Playwright
+        run: |
+          pip install playwright
+          python -m playwright install chromium --with-deps 2>&1 | tail -5
+
+      - name: 📸 Screenshot + TG notification
+        run: python latvi_screenshot.py
