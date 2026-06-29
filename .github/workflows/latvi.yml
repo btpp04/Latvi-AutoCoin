@@ -24,9 +24,10 @@ jobs:
         if: ${{ env.PROXY != '' }}
         run: |
           # Download GOST
-          curl -L -o gost "https://github.com/ginuerzh/gost/releases/download/v2.11.5/gost-linux-amd64-2.11.5"
+          curl -L -o gost.tar.gz "https://github.com/ginuerzh/gost/releases/download/v2.12.0/gost_2.12.0_linux_amd64.tar.gz"
+          tar -xzf gost.tar.gz
           chmod +x gost
-          echo "GOST downloaded: $(ls -la gost | awk '{print $5}') bytes"
+          echo "GOST ready: $(ls -la gost | awk '{print $5}') bytes"
           
           # Start tunnel
           nohup ./gost -L http://:8080 -F "$PROXY" > /tmp/gost.log 2>&1 &
