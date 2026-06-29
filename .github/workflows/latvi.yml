@@ -15,9 +15,10 @@ jobs:
           python-version: '3.11'
       - name: Install
         run: pip install requests
-      - name: Test FULL flow
+      - name: Run
         env:
           LATVI_EMAIL: ${{ secrets.LATVI_EMAIL }}
           LATVI_PASSWORD: ${{ secrets.LATVI_PASSWORD }}
           PROXY: ${{ secrets.PROXY }}
-        run: python test_full_flow.py
+          MAX_CLAIMS: "20"
+        run: python latvi_coins.py
