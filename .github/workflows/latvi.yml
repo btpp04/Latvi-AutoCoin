@@ -10,20 +10,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-
-      - name: Install deps
+      - name: Install
         run: |
-          pip install requests seleniumbase
-          seleniumbase install chromedriver
-
-      - name: Run latvi
+          pip install playwright
+          playwright install chromium
+      - name: Proxy test
         env:
-          LATVI_EMAIL: ${{ secrets.LATVI_EMAIL }}
-          LATVI_PASSWORD: ${{ secrets.LATVI_PASSWORD }}
-        run: |
-          xvfb-run -a python latvi_coin_uc.py
+          PROXY: ${{ secrets.PROXY }}
+        run: python test_proxy.py
