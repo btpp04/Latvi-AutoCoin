@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-latvi.space Auto Coin — Pure requests through GOST + talordata proxy
-Losy 思路：短链跳转绕过 linkvertise IP 检查
+latvi.space Auto Coin — Pure requests + GOST tunnel (losy approach)
+通过 GOST 隧道保持单 IP 访问完整短链流程
 """
-import os, sys, re, json, time, base64, logging, urllib.request, urllib.parse
+import os, sys, re, json, time, base64, logging
 from datetime import datetime, timezone
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -12,29 +12,28 @@ log = logging.getLogger("latvi")
 BASE = "https://dash.latvi.space"
 EMAIL = os.environ.get("LATVI_EMAIL", "btpp03@gmail.com")
 PASSWORD = os.environ.get("LATVI_PASSWORD", "Hlm@0649")
-PROXY = os.environ.get("PROXY", "").strip()
 MAX_CLAIMS = int(os.environ.get("MAX_CLAIMS", "20"))
+PROXY = os.environ.get("PROXY", "").strip()
 
 import requests
 sess = requests.Session()
 
-# Try GOST tunnel first, then direct proxy
-gost_proxy = "http://127.0.0.1:8080"
-use_proxy = PROXY  # default to direct
-# Check if GOST is running
+# Proxy priority: GOST tunnel (127.0.0.1:8080) > direct proxy > none
+GOST = "http://127.0.0.1:8080"
+use_proxy = None
 try:
-    import urllib.request
-    r = urllib.request.urlopen("http://127.0.0.1:8080", timeout=2)
-    use_proxy = gost_proxy
-    log.info("Using GOST tunnel (127.0.0.1:8080)")
+    r = requests.get(GOST, timeout=2)
+    use_proxy = GOST
+    log.info("Proxy: GOST tunnel")
 except:
     if PROXY:
-        log.info(f"Using direct proxy")
+        use_proxy = PROXY
+        log.info("Proxy: direct")
     else:
-        log.info("No proxy")
+        log.info("Proxy: none")
 
 if use_proxy:
-    sess.proxies = {"http": use_proxy, "https": use_proxy}
+    sess.proxies.update({"http": use_proxy, "https": use_proxy})
 
 sess.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"})
 
@@ -44,16 +43,16 @@ def login():
     m = re.search(r'name="_token"[^>]*value="([^"]*)"', r.text)
     token = m.group(1) if m else None
     r2 = sess.post(f"{BASE}/login", data={"email": EMAIL, "password": PASSWORD, "_token": token or ""}, timeout=15)
-    if "/home" in r2.url or "logout" in r2.text.lower():
-        log.info("✅ Logged in")
-        return True
-    log.error(f"❌ Login failed: {r2.status_code}")
-    return False
+    ok = "/home" in r2.url or "logout" in r2.text.lower()
+    log.info(f"{'✅' if ok else '❌'} Login ({r2.status_code})")
+    return ok
+
 
 def get_balance():
     r = sess.get(f"{BASE}/home", timeout=15)
     m = re.search(r'([\d.]+)\s*(?:credit|coin)', r.text, re.I)
     return float(m.group(1)) if m else 0
+
 
 def get_cooldown():
     r = sess.get(f"{BASE}/linkvertise", timeout=15)
@@ -64,150 +63,151 @@ def get_cooldown():
         return rem
     return MAX_CLAIMS
 
-def generate_link():
-    """Get link-to.net URL with embedded verify URL."""
+
+def generate():
+    """Get shortlink and extract verify URL."""
     r = sess.get(f"{BASE}/linkvertise/generate", timeout=15)
     if r.status_code != 200:
-        log.error(f"Generate failed: HTTP {r.status_code}")
         return None, None
-    
-    # Extract link-to.net URL
-    link_url = None
-    for p in [r'(https?://link-to\.net/[^\s"\'<>]+)', r'(https?://linkvertise\.com/[^\s"\'<>]+)']:
-        m = re.search(p, r.text)
-        if m:
-            link_url = m.group(1).rstrip("';,\"")
+
+    link_url, verify_url = None, None
+
+    # Extract link URL
+    for p in [r'(https?://link-to\.net/[^\s"\'<>]+)',
+              r'(https?://linkvertise\.com/[^\s"\'<>]+)',
+              r'href="([^"]*link[^"]*)"',
+              r'"url":\s*"([^"]+)"']:
+        ms = re.findall(p, r.text)
+        for u in ms:
+            u = u.rstrip("';,\"")
+            if "link-to.net" in u or "linkvertise.com" in u:
+                link_url = u
+                break
+        if link_url:
             break
-    
-    if not link_url:
-        log.error("No link URL found")
-        return None, None
-    
-    # Extract verify URL from r= parameter (base64 encoded)
-    verify_url = None
-    m = re.search(r'r=([A-Za-z0-9+/=]+)', link_url)
+
+    # Extract verify URL from r= param (base64)
+    m = re.search(r'r=([A-Za-z0-9+/=]+)', link_url or "")
     if m:
         try:
             decoded = base64.b64decode(m.group(1)).decode()
             verify_url = decoded
-            log.info(f"Verify URL extracted from r= parameter")
         except:
             pass
-    
+
     return link_url, verify_url
 
-def do_claim(link_url, verify_url):
-    """
-    1. Follow link-to.net redirect → linkvertise.com
-    2. Extract the redirect destination from linkvertise page
-    3. Call verify URL
-    """
-    # Step 1: Follow redirect through proxy
-    log.info(f"Following shortlink...")
+
+def claim(link_url, verify_url):
+    """Follow redirect chain and attempt verify."""
     try:
+        # 1. link-to.net → redirect to linkvertise
         r = sess.get(link_url, timeout=30, allow_redirects=False)
-        log.info(f"link-to.net: HTTP {r.status_code}")
-        if r.status_code in (301, 302, 303, 307, 308):
-            target = r.headers.get("Location", "")
-            log.info(f"Redirect → {target[:60]}")
-            
-            # Step 2: Visit linkvertise
-            r2 = sess.get(target, timeout=30, allow_redirects=True)
-            log.info(f"linkvertise: HTTP {r2.status_code} | {len(r2.content)}b")
-            
-            if r2.status_code != 200:
-                log.warning(f"linkvertise returned {r2.status_code}")
-                return False
-            
-            # Step 3: Try to find the actual redirect URL from the page
-            # linkvertise pages have JS that redirects to the verify URL after ads
-            # We need to find where it redirects to
-            final_url = r2.url
-            
-            # Look for any redirect URL in the response
-            # The linkvertise page usually contains a meta refresh or data URL
-            verify_target = None
-            body = r2.text
-            
-            # Check for common patterns
-            patterns = [
-                r'window\.location\s*=\s*["\']([^"\']+)',
-                r'window\.location\.href\s*=\s*["\']([^"\']+)',
-                r'location\.href\s*=\s*["\']([^"\']+)',
-                r'<meta[^>]*url=([^"\']+)',
-                r'"url":\s*"([^"]+verify[^"]+)"',
-                r'"success_url":\s*"([^"]+)"',
-            ]
-            for pat in patterns:
-                m2 = re.search(pat, body)
-                if m2:
-                    t = m2.group(1).replace("\\/", "/")
-                    if "latvi" in t.lower() or "verify" in t.lower() or "success" in t.lower():
-                        verify_target = t
-                        break
-            
-            if not verify_target and verify_url:
-                # If we have the verify URL from the r= param, just call it
-                # This might work if linkvertise accepted the visit
-                log.info("No redirect found in page, using verify URL from r= param")
-                verify_target = verify_url
-            
-            if verify_target:
-                log.info(f"Calling verify: {verify_target[:60]}")
-                r3 = sess.get(verify_target, timeout=30, allow_redirects=True)
-                log.info(f"Verify: HTTP {r3.status_code} | URL: {r3.url[:60]}")
-                if r3.status_code == 200:
-                    body_lower = r3.text.lower()
-                    if "success" in body_lower or "coin" in body_lower:
-                        log.info("✅ Claim SUCCESS!")
-                        return True
-                    else:
-                        log.info(f"Verify response (first 200 chars): {r3.text[:200]}")
-                        return True
-                else:
-                    log.warning(f"Verify failed: HTTP {r3.status_code}")
-                    return False
-            else:
-                log.warning("No verify target found")
-                return False
-        else:
-            log.warning(f"link-to.net unexpected status: {r.status_code}")
+        if r.status_code not in (301, 302, 303, 307, 308):
+            log.warning(f"link-to.net: HTTP {r.status_code} (not a redirect)")
             return False
+
+        target = r.headers.get("Location", "")
+        log.info(f"→ {target[:60]}")
+
+        # 2. Visit linkvertise page
+        r2 = sess.get(target, timeout=30, allow_redirects=True)
+        log.info(f"linkvertise: HTTP {r2.status_code} | {len(r2.content)}b")
+
+        if r2.status_code != 200:
+            return False
+
+        # 3. Wait briefly for any async redirect
+        time.sleep(3)
+
+        # 4. Try to find redirect URL from the page
+        body = r2.text
+        redirect_url = None
+
+        # Common JS/link redirect patterns
+        for pat in [r'window\.location(?:\.href)?\s*=\s*["\']([^"\']+)',
+                    r'location\.href\s*=\s*["\']([^"\']+)',
+                    r'<meta[^>]*url=([^"\'>\s]+)',
+                    r'href="([^"]*verify[^"]*)"',
+                    r'success_url["\']:\s*["\']([^"\']+)',
+                    r'"redirect":\s*"([^"]+)"',
+                    r'"link":\s*"([^"]+)"',
+                    r'"url":\s*"([^"]+)"',
+                    r'document\.location\s*=\s*["\']([^"\']+)']:
+            m = re.search(pat, body, re.I)
+            if m:
+                t = m.group(1).replace("\\/", "/")
+                # Decode any HTML entities
+                t = t.replace("&amp;", "&").replace("&#x2F;", "/")
+                if "latvi" in t.lower() or "verify" in t.lower() or "success" in t.lower():
+                    redirect_url = t
+                    log.info(f"Redirect found: {t[:60]}")
+                    break
+
+        # 5. Call verify URL (either found redirect or the r= param version)
+        call_url = redirect_url or verify_url
+        if not call_url:
+            log.warning("No verify URL available")
+            return False
+
+        r3 = sess.get(call_url, timeout=30, allow_redirects=True)
+        log.info(f"Verify: HTTP {r3.status_code} | {r3.url[:60]}")
+        body3 = r3.text.lower()
+
+        if r3.status_code == 200:
+            if "success" in body3 or "coin" in body3:
+                log.info("✅ +1 coin!")
+                return True
+            elif "already" in body3:
+                log.info("⏭ Already claimed")
+                return True
+            elif "invalid" in body3:
+                log.warning("Invalid verify")
+                return False
+            else:
+                log.info(f"Response: {r3.text[:150]}")
+                return True  # Might still have worked
+        else:
+            log.warning(f"Verify: HTTP {r3.status_code}")
+            return False
+
     except Exception as e:
-        log.error(f"Claim error: {str(e)[:100]}")
+        log.error(f"Error: {str(e)[:100]}")
         return False
+
 
 def main():
     log.info("=== Latvi Auto Coin ===")
-    
+
     if not login():
         return
-    
-    balance_before = get_balance()
-    log.info(f"Balance: {balance_before}")
-    
+
+    bal = get_balance()
+    log.info(f"Balance: {bal}")
+
     remaining = get_cooldown()
     if remaining <= 0:
-        log.info("No claims available today")
+        log.info("No claims left today")
         return
-    
-    claims = 0
+
+    success = 0
     for i in range(min(remaining, MAX_CLAIMS)):
-        log.info(f"\n--- Claim #{i+1} ---")
-        link_url, verify_url = generate_link()
+        log.info(f"--- #{i+1} ---")
+        link_url, verify_url = generate()
         if not link_url:
-            log.warning("Failed to get link")
-            break
-        
-        if do_claim(link_url, verify_url):
-            claims += 1
+            log.warning("No link generated")
             time.sleep(5)
+            continue
+
+        if claim(link_url, verify_url):
+            success += 1
+            time.sleep(3)
         else:
-            log.warning("Claim failed, may need to cool down")
             time.sleep(10)
-    
-    balance_after = get_balance()
-    log.info(f"\n=== Done: {claims} claims | Balance: {balance_before} → {balance_after} ===")
+
+    bal2 = get_balance()
+    log.info(f"=== Done: {success}/{min(remaining, MAX_CLAIMS)} | {bal} → {bal2} ===")
+
 
 if __name__ == "__main__":
     main()

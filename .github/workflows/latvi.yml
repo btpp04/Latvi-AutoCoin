@@ -5,6 +5,12 @@ on:
     - cron: '7 0,12 * * *'
   workflow_dispatch:
 
+env:
+  LATVI_EMAIL: ${{ secrets.LATVI_EMAIL }}
+  LATVI_PASSWORD: ${{ secrets.LATVI_PASSWORD }}
+  PROXY: ${{ secrets.PROXY }}
+  MAX_CLAIMS: "20"
+
 jobs:
   run:
     runs-on: ubuntu-latest
@@ -14,26 +20,20 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install GOST
+      - name: 🛡️ Start GOST tunnel (if proxy configured)
         run: |
-          wget -q "https://github.com/ginuerzh/gost/releases/download/v2.11.5/gost_2.11.5_linux_amd64.tar.gz" || \
-          wget -q "https://github.com/ginuerzh/gost/releases/download/v2.11.5/gost-linux-amd64-2.11.5.gz" -O gost.gz && gunzip gost.gz && chmod +x gost || \
-          { curl -L -o gost "https://github.com/ginuerzh/gost/releases/download/v2.11.5/gost-linux-amd64-2.11.5"; chmod +x gost; }
-          ls -la gost 2>/dev/null && echo "GOST ready" || echo "GOST download issue"
+          if [ -n "$PROXY" ]; then
+            wget -q "https://github.com/ginuerzh/gost/releases/download/v2.11.5/gost-linux-amd64-2.11.5" -O gost && chmod +x gost
+            nohup ./gost -L http://:8080 -F "$PROXY" > /tmp/gost.log 2>&1 &
+            sleep 3
+            echo "GOST PID: $(pgrep gost || echo FAILED)"
+            curl -s -x http://127.0.0.1:8080 https://ipinfo.talordata.com 2>/dev/null | jq -r '{ip, isp} | join(" | ")' || echo "GOST check skipped"
+          else
+            echo "No proxy configured"
+          fi
 
-      - name: Start GOST tunnel
-        run: |
-          nohup ./gost -L http://:8080 -F "${{ secrets.PROXY }}" > /tmp/gost.log 2>&1 &
-          sleep 3
-          echo "GOST PID: $(pgrep gost || echo FAILED)"
-          curl -s -x http://127.0.0.1:8080 https://ipinfo.talordata.com 2>/dev/null | jq -r '{ip, hosting, isp} | join(" | ")' || echo "GOST test failed"
-
-      - name: Install requests
+      - name: 📦 Install requests
         run: pip install requests
 
-      - name: Run
-        env:
-          LATVI_EMAIL: ${{ secrets.LATVI_EMAIL }}
-          LATVI_PASSWORD: ${{ secrets.LATVI_PASSWORD }}
-          MAX_CLAIMS: "20"
+      - name: 🚀 Run
         run: python latvi_coins.py
