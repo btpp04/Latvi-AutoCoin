@@ -200,10 +200,9 @@ def send_tg(msg: str):
         log.info("TG notification skipped (no bot token/chat ID)")
         return
     try:
-        import urllib.request as ur
-        data = urllib.parse.urlencode({"chat_id": chat_id, "text": msg, "parse_mode": "HTML"}).encode()
-        r = ur.urlopen(f"https://api.telegram.org/bot{bot_token}/sendMessage", data=data, timeout=15)
-        log.info(f"TG sent ({r.status})")
+        r = requests.post(f"https://api.telegram.org/bot{bot_token}/sendMessage",
+            data={"chat_id": chat_id, "text": msg, "parse_mode": "HTML"}, timeout=15)
+        log.info(f"TG sent ({r.status_code})")
     except Exception as e:
         log.warning(f"TG failed: {e}")
 
