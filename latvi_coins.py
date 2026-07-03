@@ -62,7 +62,8 @@ def login():
 def get_balance():
     r = sess.get(f"{BASE}/home", timeout=15)
     html = r.text.lower()
-    log.info(f"BALANCE_DEBUG: {html[:2500]}")
+    with open("/tmp/latvi_home_full.html", "w") as f:
+        f.write(r.text)
     # Try: number near "credit" or "credits"
     m = re.search(r'(\d+[.,]?\d*)\s*credit', html)
     if m: return float(m.group(1).replace(",", ""))
@@ -231,7 +232,9 @@ def daily_reward():
                 log.info(f"Daily reward: next in {secs//3600}h {(secs%3600)//60}m (streak: {streak.group(1) if streak else '?'})")
                 return False
 
-        log.info(f"Daily reward: claiming (streak: {streak.group(1) if streak else '?'})...")
+        with open("/tmp/latvi_dr_full.html", "w") as f:
+        f.write(r.text)
+    log.info(f"Daily reward: claiming (streak: {streak.group(1) if streak else '?'})...")
         headers = {
             "Content-Type": "application/json",
             "X-CSRF-TOKEN": token,
