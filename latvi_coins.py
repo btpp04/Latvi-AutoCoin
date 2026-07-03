@@ -270,7 +270,15 @@ def main():
     )
     send_tg(tg_msg)
 
-    # Step 2: Linkvertise coins (needs clean IP)
+    # Step 2: Linkvertise coins (needs clean IP, skip when no proxy)
+    if not use_proxy:
+        log.info("No proxy available, skipping linkvertise coins")
+        bal2 = get_balance()
+        send_tg(f"<b>🏝 Latvi 签到</b>\n<b>Repo:</b> btpp04/Latvi-AutoCoin\n<b>余额:</b> {bal2} Credits\n(linkvertise 跳过 - 代理不可用)")
+        with open("/tmp/latvi_balance.txt", "w") as f:
+            f.write(f"{bal2}")
+        print(f"=== Done: proxy off | {bal} -> {bal2} ===")
+        return
     remaining = get_cooldown()
     if remaining <= 0:
         log.info("No linkvertise claims left today")
