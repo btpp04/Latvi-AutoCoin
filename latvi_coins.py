@@ -62,6 +62,7 @@ def login():
 def get_balance():
     r = sess.get(f"{BASE}/home", timeout=15)
     html = r.text.lower()
+    log.info(f"BALANCE_DEBUG: {html[:2500]}")
     # Try: number near "credit" or "credits"
     m = re.search(r'(\d+[.,]?\d*)\s*credit', html)
     if m: return float(m.group(1).replace(",", ""))
