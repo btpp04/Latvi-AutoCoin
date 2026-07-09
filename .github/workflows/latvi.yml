@@ -10,6 +10,10 @@ on:
         required: false
         default: 'true'
 
+  push:
+    branches:
+      - main
+
 env:
   LATVI_EMAIL: ${{ secrets.LATVI_EMAIL }}
   LATVI_PASSWORD: ${{ secrets.LATVI_PASSWORD }}
