@@ -27,24 +27,32 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: 🛡️ Start GOST tunnel
+      - name: 🛡️ Setup proxy tunnel (sing-box for hy2 / GOST for std)
         if: ${{ env.PROXY != '' }}
         continue-on-error: true
         run: |
-          echo "Proxy type: ${PROXY:0:8}"
-          
-          # Download GOST
-          curl -L -o gost.tar.gz "https://github.com/ginuerzh/gost/releases/download/v2.12.0/gost_2.12.0_linux_amd64.tar.gz"
-          tar -xzf gost.tar.gz
-          chmod +x gost
-          
-          # Start tunnel
-          nohup ./gost -L http://:8080 -F "$PROXY" > /tmp/gost.log 2>&1 &
-          sleep 4
-          pgrep gost && echo "GOST OK" || echo "GOST FAILED"
-          
-          # Verify
-          curl -s --max-time 10 -x http://127.0.0.1:8080 https://ipinfo.talordata.com 2>/dev/null | jq -r '{ip, isp} | join(" | ")' 2>/dev/null || echo "GOST verify skipped"
+          echo "Proxy type: ${PROXY:0:12}"
+          if [[ "$PROXY" == hysteria2://* ]]; then
+            echo "==> hy2 detected, starting sing-box tunnel =="
+            curl -L -o sb.tar.gz "https://github.com/SagerNet/sing-box/releases/download/v1.11.7/sing-box-1.11.7-linux-amd64.tar.gz"
+            tar -xzf sb.tar.gz
+            mv sing-box-*/sing-box ./sing-box
+            chmod +x ./sing-box
+            python3 -c "import os,json,re,urllib.parse; u=os.environ['PROXY']; m=re.match(r'hysteria2://([^@]+)@([^:]+):(\\d+)\\?([^#]*)',u); pw=m.group(1); srv=m.group(2); port=int(m.group(3)); qs=dict(urllib.parse.parse_qsl(m.group(4))); peer=qs.get('peer','www.bing.com'); json.dump({'log':{'level':'warn'},'inbounds':[{'type':'socks','tag':'socks-in','listen':'127.0.0.1','listen_port':1080}],'outbounds':[{'type':'hysteria2','tag':'proxy','server':srv,'server_port':port,'password':pw,'tls':{'enabled':True,'server_name':peer,'insecure':True}}]},open('sb_config.json','w')); print('sing-box config written')"
+            nohup ./sing-box run -c sb_config.json > /tmp/sb.log 2>&1 &
+            sleep 4
+            pgrep sing-box && echo "SING-BOX OK" || echo "SING-BOX FAILED"
+            curl -s --max-time 10 -x socks5://127.0.0.1:1080 https://api.ipify.org && echo " <- tunnel ip" || echo "verify skipped"
+          else
+            echo "==> standard proxy, starting GOST tunnel =="
+            curl -L -o gost.tar.gz "https://github.com/ginuerzh/gost/releases/download/v2.12.0/gost_2.12.0_linux_amd64.tar.gz"
+            tar -xzf gost.tar.gz
+            chmod +x gost
+            nohup ./gost -L http://:8080 -F "$PROXY" > /tmp/gost.log 2>&1 &
+            sleep 4
+            pgrep gost && echo "GOST OK" || echo "GOST FAILED"
+            curl -s --max-time 10 -x http://127.0.0.1:8080 https://ipinfo.talordata.com 2>/dev/null | jq -r '{ip, isp} | join(" | ")' 2>/dev/null || echo "GOST verify skipped"
+          fi
           
       - name: 📦 Install requests (with socks fallback)
         run: |
