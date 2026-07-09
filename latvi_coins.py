@@ -159,31 +159,42 @@ def claim(link_url, verify_url):
         body = r2.text
         redirect_url = None
 
-        # Common JS/link redirect patterns
-        for pat in [r'window\.location(?:\.href)?\s*=\s*["\']([^"\']+)',
-                    r'location\.href\s*=\s*["\']([^"\']+)',
-                    r'<meta[^>]*url=([^"\'>\s]+)',
-                    r'href="([^"]*verify[^"]*)"',
-                    r'success_url["\']:\s*["\']([^"\']+)',
-                    r'"redirect":\s*"([^"]+)"',
-                    r'"link":\s*"([^"]+)"',
-                    r'"url":\s*"([^"]+)"',
-                    r'document\.location\s*=\s*["\']([^"\']+)']:
-            m = re.search(pat, body, re.I)
-            if m:
-                t = m.group(1).replace("\\/", "/")
-                # Decode any HTML entities
-                t = t.replace("&amp;", "&").replace("&#x2F;", "/")
-                if "latvi" in t.lower() or "verify" in t.lower() or "success" in t.lower():
-                    redirect_url = t
-                    log.info(f"Redirect found: {t[:60]}")
-                    break
+        # First: look for any dash.latvi.space link in the page (incl. verify?token=)
+        for m in re.finditer(r'(https?://dash\.latvi\.space[^\s"\'<>]+)', body):
+            u = m.group(1).replace("\\/", "/").replace("&amp;", "&")
+            if "verify" in u or "success" in u or "token" in u:
+                redirect_url = u
+                log.info(f"Redirect found (latvi link): {u[:80]}")
+                break
+
+        # Fallback: common JS/link redirect patterns
+        if not redirect_url:
+            for pat in [r'window\.location(?:\.href)?\s*=\s*["\']([^"\']+)',
+                        r'location\.href\s*=\s*["\']([^"\']+)',
+                        r'<meta[^>]*url=([^"\'>\s]+)',
+                        r'href="([^"]*verify[^"]*)"',
+                        r'success_url["\']:\s*["\']([^"\']+)',
+                        r'"redirect":\s*"([^"]+)"',
+                        r'"link":\s*"([^"]+)"',
+                        r'"url":\s*"([^"]+)"',
+                        r'document\.location\s*=\s*["\']([^"\']+)']:
+                m = re.search(pat, body, re.I)
+                if m:
+                    t = m.group(1).replace("\\/", "/")
+                    t = t.replace("&amp;", "&").replace("&#x2F;", "/")
+                    if "latvi" in t.lower() or "verify" in t.lower() or "success" in t.lower():
+                        redirect_url = t
+                        log.info(f"Redirect found: {t[:60]}")
+                        break
 
         # 5. Call verify URL (either found redirect or the r= param version)
         call_url = redirect_url or verify_url
         if not call_url:
             log.warning("No verify URL available")
             return False
+        # ensure absolute URL
+        if call_url.startswith("/"):
+            call_url = BASE + call_url
 
         r3 = sess.get(call_url, timeout=30, allow_redirects=True)
         log.info(f"Verify: HTTP {r3.status_code} | {r3.url[:60]}")
