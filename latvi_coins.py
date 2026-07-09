@@ -21,13 +21,15 @@ sess = requests.Session()
 # Proxy priority: SOCKS5 direct > GOST tunnel > none
 use_proxy = None
 proxy_type = "none"
+skip_test = False  # hy2 via sing-box is already verified live by the workflow
 
 if PROXY:
     if PROXY.startswith("hysteria2://"):
         # sing-box tunnel started by workflow listens on socks5://127.0.0.1:1080
-        # (don't probe with HTTP — it's a SOCKS5 port)
+        # (already verified live by the workflow's wait-for-port loop)
         use_proxy = "socks5://127.0.0.1:1080"
         proxy_type = "sing-box (hy2)"
+        skip_test = True
     else:
         # Standard proxy (GOST tunnel on :8080 or direct)
         try:
@@ -39,18 +41,23 @@ if PROXY:
             proxy_type = "HTTP direct"
 
 if use_proxy:
-    # Test if proxy actually works
-    try:
-        r = requests.get("https://dash.latvi.space/login", proxies={"http": use_proxy, "https": use_proxy}, timeout=10)
-        if r.status_code == 200:
-            sess.proxies.update({"http": use_proxy, "https": use_proxy})
-            log.info(f"Proxy: {proxy_type} ✅")
-        else:
-            log.warning(f"Proxy {proxy_type} returned HTTP {r.status_code}, falling back to direct")
+    if skip_test:
+        # sing-box already verified live by workflow; apply directly
+        sess.proxies.update({"http": use_proxy, "https": use_proxy})
+        log.info(f"Proxy: {proxy_type} ✅ (pre-verified)")
+    else:
+        # Test if proxy actually works
+        try:
+            r = requests.get("https://dash.latvi.space/login", proxies={"http": use_proxy, "https": use_proxy}, timeout=10)
+            if r.status_code == 200:
+                sess.proxies.update({"http": use_proxy, "https": use_proxy})
+                log.info(f"Proxy: {proxy_type} ✅")
+            else:
+                log.warning(f"Proxy {proxy_type} returned HTTP {r.status_code}, falling back to direct")
+                use_proxy = None
+        except Exception as e:
+            log.warning(f"Proxy {proxy_type} failed ({e}), falling back to direct")
             use_proxy = None
-    except Exception as e:
-        log.warning(f"Proxy {proxy_type} failed ({e}), falling back to direct")
-        use_proxy = None
 
 sess.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"})
 
