@@ -40,8 +40,14 @@ jobs:
             chmod +x ./sing-box
             python3 -c "import os,json,re,urllib.parse; u=os.environ['PROXY']; m=re.match(r'hysteria2://([^@]+)@([^:]+):(\\d+)\\?([^#]*)',u); pw=m.group(1); srv=m.group(2); port=int(m.group(3)); qs=dict(urllib.parse.parse_qsl(m.group(4))); peer=qs.get('peer','www.bing.com'); json.dump({'log':{'level':'warn'},'inbounds':[{'type':'socks','tag':'socks-in','listen':'127.0.0.1','listen_port':1080}],'outbounds':[{'type':'hysteria2','tag':'proxy','server':srv,'server_port':port,'password':pw,'tls':{'enabled':True,'server_name':peer,'insecure':True}}]},open('sb_config.json','w')); print('sing-box config written')"
             nohup ./sing-box run -c sb_config.json > /tmp/sb.log 2>&1 &
-            sleep 4
-            pgrep sing-box && echo "SING-BOX OK" || echo "SING-BOX FAILED"
+            # wait for socks5 port to be actually listening (not just process start)
+            for i in $(seq 1 20); do
+              if curl -s --max-time 3 -x socks5://127.0.0.1:1080 https://api.ipify.org >/dev/null 2>&1; then
+                echo "SING-BOX OK (port live)"; break
+              fi
+              sleep 1
+            done
+            pgrep sing-box >/dev/null && echo "sing-box proc up" || echo "SING-BOX FAILED"
             curl -s --max-time 10 -x socks5://127.0.0.1:1080 https://api.ipify.org && echo " <- tunnel ip" || echo "verify skipped"
           else
             echo "==> standard proxy, starting GOST tunnel =="
