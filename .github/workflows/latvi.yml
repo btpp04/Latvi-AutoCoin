@@ -89,3 +89,5 @@ for m in re.finditer(r">(\d+\.\d+)<", html):
           python -m playwright install chromium --with-deps 2>&1 | tail -5
           pip install pillow
           python latvi_screenshot.py
+
+# trigger metadata refresh
