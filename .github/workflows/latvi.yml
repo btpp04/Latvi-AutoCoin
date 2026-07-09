@@ -63,35 +63,6 @@ jobs:
       - name: 🚀 Run (daily reward + linkvertise)
         run: python latvi_coins.py
 
-      - name: 🔍 Debug HTML dump
-        run: |
-          if [ -f /tmp/latvi_home_full.html ]; then
-            echo "=== HOME PAGE ==="
-            python3 -c "
-import re
-with open('/tmp/latvi_home_full.html') as f:
-    html = f.read()
-print(f'Length: {len(html)}')
-for m in re.finditer(r".{0,40}(?:credit|Credits|\d+\.\d+).{0,40}", html):
-    print(m.group())
-for m in re.finditer(r">(\d+\.\d+)<", html):
-    print(f'Num: {m.group(1)}')
-"
-          fi
-          if [ -f /tmp/latvi_dr_full.html ]; then
-            echo "=== DAILY REWARDS PAGE ==="
-            python3 -c "
-import re
-with open('/tmp/latvi_dr_full.html') as f:
-    html = f.read()
-print(f'Length: {len(html)}')
-for m in re.finditer(r".{0,40}(?:credit|Credits|\d+\.\d+|streak).{0,40}", html, re.I):
-    print(m.group())
-for m in re.finditer(r">(\d+\.\d+)<", html):
-    print(f'Num: {m.group(1)}')
-"
-          fi
-
       - name: 📸 Screenshot + TG notification
         if: env.TG_BOT_TOKEN != ''
         continue-on-error: true
