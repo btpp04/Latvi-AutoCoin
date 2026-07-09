@@ -33,6 +33,7 @@ jobs:
 
       - name: 🛡️ Start GOST tunnel
         if: ${{ env.PROXY != '' }}
+        continue-on-error: true
         run: |
           echo "Proxy type: ${PROXY:0:8}"
           
@@ -93,6 +94,7 @@ for m in re.finditer(r">(\d+\.\d+)<", html):
 
       - name: 📸 Screenshot + TG notification
         if: env.TG_BOT_TOKEN != ''
+        continue-on-error: true
         run: |
           pip install playwright
           python -m playwright install chromium --with-deps 2>&1 | tail -5
