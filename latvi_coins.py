@@ -27,10 +27,15 @@ sess = requests.Session()
 sess.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"})
 
 # Proxy setup
+# hysteria2:// → workflow starts sing-box on 127.0.0.1:1080 (socks5)
+# socks5:// / http:// → direct
 use_proxy = None
 proxy_type = "none"
 if PROXY:
-    if PROXY.startswith("socks5://"):
+    if PROXY.startswith("hysteria2://"):
+        use_proxy = "socks5://127.0.0.1:1080"
+        proxy_type = "sing-box (hy2)"
+    elif PROXY.startswith("socks5://"):
         try:
             import socks  # noqa
             use_proxy = PROXY
